@@ -1,7 +1,6 @@
 #!/bin/bash
 
 # SADP GUI para Linux - Script de Instalación de Producción
-# Con detección automática de interfaz de red
 # Uso: bash setup-produccion.sh
 
 set -e
@@ -42,49 +41,6 @@ echo "📋 Sistema: $(grep PRETTY_NAME /etc/os-release | cut -d'"' -f2)"
 echo "📁 Instalación en: $INSTALL_DIR"
 echo ""
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# FUNCIÓN: Detectar interfaz de red
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-detect_network_interface() {
-    echo "🔍 Detectando interfaz de red activa..."
-    
-    # Método 1: Usar ip route para obtener la interfaz por defecto
-    DEFAULT_IFACE=$(ip route | grep '^default' | awk '{print $5}' | head -1)
-    
-    if [[ -n "$DEFAULT_IFACE" ]]; then
-        # Obtener la IP de esa interfaz
-        IFACE_IP=$(ip addr show "$DEFAULT_IFACE" | grep "inet " | awk '{print $2}' | cut -d'/' -f1)
-        
-        if [[ -n "$IFACE_IP" ]]; then
-            echo "✅ Interfaz detectada: $DEFAULT_IFACE"
-            echo "   IP: $IFACE_IP"
-            echo ""
-            return 0
-        fi
-    fi
-    
-    # Método 2: Si falla, buscar cualquier interfaz con IP (no loopback)
-    echo "⚠️  No se detectó interfaz por defecto, buscando alternativas..."
-    
-    DEFAULT_IFACE=$(ip link show | grep "UP" | grep -v "lo:" | awk '{print $2}' | sed 's/:$//' | head -1)
-    
-    if [[ -n "$DEFAULT_IFACE" ]]; then
-        IFACE_IP=$(ip addr show "$DEFAULT_IFACE" | grep "inet " | awk '{print $2}' | cut -d'/' -f1)
-        
-        if [[ -n "$IFACE_IP" ]]; then
-            echo "✅ Interfaz alternativa detectada: $DEFAULT_IFACE"
-            echo "   IP: $IFACE_IP"
-            echo ""
-            return 0
-        fi
-    fi
-    
-    echo "❌ No se pudo detectar ninguna interfaz de red activa"
-    return 1
-}
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # FUNCIÓN: Configurar firewall para SADP multicast
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -172,20 +128,17 @@ echo "✅ Dependencias instaladas"
 echo ""
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Paso 2: Detectar interfaz de red
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Paso 2: Verificando configuración de red
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "Paso 2: Detectando configuración de red..."
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "Paso 2: Verificando configuración de red..."
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "🔎 No es necesaria una interfaz específica: SADP busca sobre la red local activa."
 echo ""
 
-if ! detect_network_interface; then
-    echo "❌ No se pudo detectar la interfaz de red"
-    exit 1
-fi
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Paso 3: Compilar binario SADP
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -259,6 +212,25 @@ chmod +x "$LAUNCHER"
 echo "✅ Lanzador creado: sadp-gui"
 echo ""
 
+APPLICATIONS_DIR="$HOME/.local/share/applications"
+mkdir -p "$APPLICATIONS_DIR"
+DESKTOP_FILE="$APPLICATIONS_DIR/sadp-gui.desktop"
+cat > "$DESKTOP_FILE" << DESKTOP_EOF
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=SADP GUI
+Comment=Descubrir cámaras Hikvision en la red local
+Exec=$LAUNCHER
+Terminal=false
+Icon=network-workgroup
+Categories=Network;Utility;
+StartupNotify=true
+DESKTOP_EOF
+chmod +x "$DESKTOP_FILE"
+echo "✅ Lanzador de escritorio creado: $DESKTOP_FILE"
+echo ""
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Paso 6: Configurar permisos de red
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -318,12 +290,9 @@ echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 echo "📋 Configuración aplicada:"
-echo "   • Interfaz de red: $DEFAULT_IFACE"
-echo "   • IP local: $IFACE_IP"
 echo "   • Firewall: Configurado para multicast"
 echo "   • Directorio instalación: $INSTALL_DIR"
-echo ""
-echo "📞 Credenciales predeterminada: admin / 12345"
+echo "   • Lanzador de escritorio: $DESKTOP_FILE"
 echo ""
 echo "✨ ¡Listo para usar en cualquier PC!"
 echo ""

@@ -10,7 +10,10 @@ bash setup-produccion.sh
 
 # Una vez completada la instalación:
 sadp-gui
-```
+``` 
+
+- Se crea un lanzador de escritorio para que la aplicación aparezca en el menú de Ubuntu.
+
 
 **⚠️ NOTA IMPORTANTE:** 
 - ✅ Ejecuta: `bash setup-produccion.sh` (SIN sudo)
