@@ -29,18 +29,11 @@ sadp-gui
 
 El instalador crea un lanzador de usuario en `~/.local/share/applications/sadp-gui.desktop` y un comando `sadp-gui`, por lo que la aplicación aparecerá en el menú de Ubuntu como cualquier otra app de usuario.
 
-También hay accesos directos de escritorio dentro del repositorio para ejecutar los scripts directamente con doble clic:
-
-- `run-clean-install.desktop` — lanza `clean-install.sh`
-- `run-setup-produccion.desktop` — lanza `setup-produccion.sh`
-
 ## 📚 Documentación
 
 - [Instalación](docs/INSTALACION.md)
 - [Cómo usar](docs/USO.md)
 - [Solución de problemas](docs/TROUBLESHOOTING.md)
-
-Por qué esas entradas están listadas: son enlaces a archivos dentro de la carpeta `docs/` que contienen guías ampliadas (instalación, uso y solución de problemas). Separar la documentación en páginas específicas ayuda a mantener el README conciso y ofrece instrucciones detalladas cuando las necesitas.
 
 ## 📄 Licencia
 

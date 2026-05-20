@@ -6,8 +6,9 @@ Esta página describe la instalación de la aplicación SADP GUI en sistemas Ubu
 
 - Ubuntu 20.04 LTS o superior
 - Conexión a la red local donde estén las cámaras Hikvision
-- `git`, `go` (para compilar el binario si no se usa un binario precompilado)
-- `python3` y `python3-pyqt6` para la interfaz gráfica
+- Acceso a internet para descargar dependencias y clonar repositorios
+- `python3` y `python3-pyqt6` para la interfaz gráfica (el instalador puede instalarlos)
+- Opcionalmente `git` y `golang-go` si quieres compilar el binario localmente
 
 ## Instalación rápida (usuario)
 
@@ -18,7 +19,7 @@ cd /ruta/al/repositorio
 bash setup-produccion.sh
 ```
 
-> Nota: ejecuta el script sin `sudo`. El instalador pedirá permisos elevador (sudo) cuando sean necesarios. Ejecutarlo como `sudo` instalaría los archivos en el home de `root` y no funcionaría correctamente para tu usuario.
+> Nota: ejecuta el script sin `sudo`. El instalador pedirá permisos elevador cuando sean necesarios. Ejecutar el script como `sudo` instalaría los archivos en el home de `root` y no funcionaría correctamente para tu usuario.
 
 2. Finalizada la instalación:
 
