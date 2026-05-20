@@ -9,6 +9,20 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QFont
 
+
+class SortableItem(QTableWidgetItem):
+    """QTableWidgetItem que soporta clave de ordenación personalizada."""
+    def __init__(self, text: str, sort_key=None):
+        super().__init__(text)
+        self.sort_key = sort_key if sort_key is not None else text
+
+    def __lt__(self, other):
+        try:
+            # Comparar por la clave de ordenación si existe
+            return self.sort_key < other.sort_key
+        except Exception:
+            return super().__lt__(other)
+
 class ScanThread(QThread):
     """Thread para ejecutar el escaneo sin congelar la interfaz"""
     finished = pyqtSignal()
@@ -179,6 +193,8 @@ class SADPGui(QMainWindow):
         self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.tabla.setSelectionBehavior(self.tabla.SelectionBehavior.SelectRows)
         self.tabla.cellDoubleClicked.connect(self.celda_clickeada)
+        # Permitir ordenar por columnas haciendo click en el encabezado
+        self.tabla.setSortingEnabled(True)
         self.layout.addWidget(self.tabla)
         
         # Almacenar dispositivos para exportar
@@ -214,14 +230,40 @@ class SADPGui(QMainWindow):
         for idx, disp in enumerate(dispositivos):
             row_position = self.tabla.rowCount()
             self.tabla.insertRow(row_position)
-            
-            self.tabla.setItem(row_position, 0, QTableWidgetItem(disp['ip']))
-            self.tabla.setItem(row_position, 1, QTableWidgetItem(disp['mac']))
-            self.tabla.setItem(row_position, 2, QTableWidgetItem(disp['tipo']))
-            self.tabla.setItem(row_position, 3, QTableWidgetItem(disp['estado']))
-            self.tabla.setItem(row_position, 4, QTableWidgetItem(disp['puerto']))
-            self.tabla.setItem(row_position, 5, QTableWidgetItem(disp['serial']))
-            self.tabla.setItem(row_position, 6, QTableWidgetItem(disp['version']))
+            # IP: convertir a tupla de enteros para ordenar correctamente
+            ip_text = disp.get('ip', '')
+            try:
+                ip_key = tuple(int(x) for x in ip_text.split('.') if x != '')
+            except Exception:
+                ip_key = ip_text
+            self.tabla.setItem(row_position, 0, SortableItem(ip_text, sort_key=ip_key))
+
+            # MAC: normalizar para ordenar
+            mac_text = disp.get('mac', '')
+            mac_key = mac_text.replace(':', '').replace('-', '').lower()
+            self.tabla.setItem(row_position, 1, SortableItem(mac_text, sort_key=mac_key))
+
+            # Tipo y Estado: ordenar por texto
+            tipo_text = disp.get('tipo', '')
+            self.tabla.setItem(row_position, 2, SortableItem(tipo_text, sort_key=tipo_text))
+
+            estado_text = disp.get('estado', '')
+            self.tabla.setItem(row_position, 3, SortableItem(estado_text, sort_key=estado_text))
+
+            # Puerto: ordenar numéricamente si es posible
+            puerto_text = disp.get('puerto', '')
+            try:
+                puerto_key = int(puerto_text)
+            except Exception:
+                puerto_key = puerto_text
+            self.tabla.setItem(row_position, 4, SortableItem(puerto_text, sort_key=puerto_key))
+
+            # Serial y Versión: texto
+            serial_text = disp.get('serial', '')
+            self.tabla.setItem(row_position, 5, SortableItem(serial_text, sort_key=serial_text))
+
+            version_text = disp.get('version', '')
+            self.tabla.setItem(row_position, 6, SortableItem(version_text, sort_key=version_text))
         
         self.status_label.setText(f"✅ Se encontraron {len(dispositivos)} dispositivo(s)")
 
