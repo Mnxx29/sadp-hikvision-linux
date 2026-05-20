@@ -5,9 +5,18 @@ Herramienta gráfica nativa de Linux para descubrir y acceder a cámaras IP Hikv
 ## 🚀 Instalación Rápida
 
 ```bash
-bash setup.sh
+# ⚠️  IMPORTANTE: Ejecuta SIN sudo (el script pedirá sudo cuando sea necesario)
+bash setup-produccion.sh
+
+# Una vez completada la instalación:
 sadp-gui
 ```
+
+**⚠️ NOTA IMPORTANTE:** 
+- ✅ Ejecuta: `bash setup-produccion.sh` (SIN sudo)
+- ❌ NO ejecutes: `sudo bash setup-produccion.sh`
+
+Si ejecutas con `sudo`, se instalará en el home de root y no funcionará para otros usuarios.
 
 ## 📋 Requisitos
 

@@ -1,16 +1,33 @@
 #!/bin/bash
 
-# SADP GUI para Linux - Script de Instalación de Producción v2
+# SADP GUI para Linux - Script de Instalación de Producción
 # Con detección automática de interfaz de red
 # Uso: bash setup-produccion.sh
 
 set -e
 
 echo "╔════════════════════════════════════════════════════════════╗"
-echo "║    SADP GUI para Linux - Instalación de Producción v2     ║"
+echo "║    SADP GUI para Linux - Instalación de Producción        ║"
 echo "║    Descubridor de Cámaras Hikvision                       ║"
 echo "╚════════════════════════════════════════════════════════════╝"
 echo ""
+
+# Validar que NO se ejecuta con sudo
+if [[ "$EUID" -eq 0 ]]; then
+    echo "❌ ERROR: Este script NO debe ejecutarse con sudo"
+    echo ""
+    echo "   Ejecuta:"
+    echo "   bash setup-produccion.sh"
+    echo ""
+    echo "   NO ejecutes:"
+    echo "   sudo bash setup-produccion.sh"
+    echo ""
+    echo "   El script pedirá sudo automáticamente cuando sea necesario"
+    exit 1
+fi
+
+# Guardar el directorio donde se ejecutó el script (donde están los archivos)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Verificar que es Ubuntu
 if ! grep -q "Ubuntu" /etc/os-release 2>/dev/null; then
@@ -68,29 +85,73 @@ detect_network_interface() {
 }
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# FUNCIÓN: Configurar UFW para multicast
+# FUNCIÓN: Configurar firewall para SADP multicast
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 configure_ufw() {
-    echo "🔐 Configurando firewall para multicast SADP..."
+    echo "🔐 Configurando firewall para SADP multicast..."
     
     # Verificar si UFW está instalado
     if ! command -v ufw &> /dev/null; then
-        echo "   UFW no instalado, saltando configuración"
+        echo "   ⚠️  UFW no instalado, usando iptables directamente"
+        configure_iptables
         return 0
     fi
     
-    # Permitir multicast globalmente (como Windows)
+    # Intentar configurar con UFW (método moderno)
+    local ufw_ok=true
+    
+    # Permitir puerto SADP específico (UDP 37810)
+    sudo ufw allow 37810/udp 2>/dev/null && \
+        echo "   ✓ Puerto SADP UDP 37810 permitido" || {
+        echo "   ⚠️  No se pudo permitir puerto 37810 en UFW"
+        ufw_ok=false
+    }
+    
+    # Permitir multicast en entrada
     sudo ufw allow in proto udp to 224.0.0.0/4 2>/dev/null && \
-        echo "   ✓ Multicast entrada permitida" || echo "   ⚠️  Multicast entrada (puede estar ya configurado)"
+        echo "   ✓ Multicast entrada permitido" || echo "   ⚠️  Multicast entrada (intento fallido)"
     
+    # Permitir multicast en salida
     sudo ufw allow out proto udp to 224.0.0.0/4 2>/dev/null && \
-        echo "   ✓ Multicast salida permitida" || echo "   ⚠️  Multicast salida (puede estar ya configurado)"
+        echo "   ✓ Multicast salida permitido" || echo "   ⚠️  Multicast salida (intento fallido)"
     
-    # Habilitar UFW
-    sudo ufw enable 2>/dev/null && echo "   ✓ Firewall habilitado" || echo "   ⚠️  Firewall ya estaba activo"
+    # Habilitar UFW si no está habilitado
+    if ! sudo ufw status | grep -q "Status: active"; then
+        sudo ufw --force enable 2>/dev/null && echo "   ✓ Firewall habilitado" || echo "   ⚠️  Error habilitando firewall"
+    else
+        echo "   ✓ Firewall ya está activo"
+    fi
+    
+    # Si UFW falla, usar iptables como fallback
+    if [[ "$ufw_ok" == false ]]; then
+        echo ""
+        echo "   📋 Configurando reglas iptables adicionales..."
+        configure_iptables
+    fi
     
     echo ""
+}
+
+configure_iptables() {
+    echo "   🔧 Configurando iptables para SADP..."
+    
+    # Permitir todo el tráfico multicast
+    sudo iptables -A INPUT -d 224.0.0.0/4 -j ACCEPT 2>/dev/null && echo "   ✓ Entrada multicast aceptada" || true
+    sudo iptables -A OUTPUT -d 224.0.0.0/4 -j ACCEPT 2>/dev/null && echo "   ✓ Salida multicast aceptada" || true
+    
+    # Permitir específicamente puerto SADP
+    sudo iptables -A INPUT -p udp --dport 37810 -j ACCEPT 2>/dev/null && echo "   ✓ Puerto entrada 37810 aceptado" || true
+    sudo iptables -A OUTPUT -p udp --dport 37810 -j ACCEPT 2>/dev/null && echo "   ✓ Puerto salida 37810 aceptado" || true
+    
+    # Persistir las reglas (ip6tables también)
+    if command -v iptables-save &> /dev/null; then
+        sudo iptables-save | sudo tee /etc/iptables/rules.v4 >/dev/null 2>&1 || true
+    fi
+    
+    if command -v ip6tables-save &> /dev/null; then
+        sudo ip6tables-save | sudo tee /etc/iptables/rules.v6 >/dev/null 2>&1 || true
+    fi
 }
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -165,16 +226,14 @@ echo "Paso 4: Instalando interfaz gráfica..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-if [[ -f "gui_sadp.py" ]]; then
-    cp gui_sadp.py "$INSTALL_DIR/"
-    chmod +x "$INSTALL_DIR/gui_sadp.py"
-    echo "✅ GUI instalada"
-elif [[ -f "../gui_sadp.py" ]]; then
-    cp ../gui_sadp.py "$INSTALL_DIR/"
+# Buscar gui_sadp.py en el directorio original del script
+if [[ -f "$SCRIPT_DIR/gui_sadp.py" ]]; then
+    cp "$SCRIPT_DIR/gui_sadp.py" "$INSTALL_DIR/"
     chmod +x "$INSTALL_DIR/gui_sadp.py"
     echo "✅ GUI instalada"
 else
-    echo "❌ No se pudo encontrar gui_sadp.py"
+    echo "❌ No se pudo encontrar gui_sadp.py en $SCRIPT_DIR"
+    echo "   Asegúrate de que el archivo gui_sadp.py está en el mismo directorio que el script de instalación"
     exit 1
 fi
 
@@ -212,7 +271,7 @@ echo ""
 configure_ufw
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Paso 7: Configurar permisos del binario
+# Paso 7: Configurar permisos de red para el binario
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -220,16 +279,19 @@ echo "Paso 7: Configurando permisos de red para el binario..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-if sudo -n true 2>/dev/null; then
-    sudo setcap cap_net_raw,cap_net_admin=eip "$INSTALL_DIR/sadp-linux-amd64" 2>/dev/null && \
-        echo "✅ Permisos de red configurados" || \
-        echo "⚠️  No se pudieron configurar permisos (opcional)"
+echo "   Configurando capabilities del binario para multicast..."
+if command -v setcap &> /dev/null; then
+    # Dar capacidades necesarias para raw sockets y multicast
+    sudo setcap cap_net_raw=ep "$INSTALL_DIR/sadp-linux-amd64" 2>/dev/null && \
+        echo "   ✅ Permisos cap_net_raw configurados" || \
+        echo "   ⚠️  Error configurando cap_net_raw"
+    
+    # Verificar que se asignaron correctamente
+    if sudo getcap "$INSTALL_DIR/sadp-linux-amd64" 2>/dev/null | grep -q "cap_net_raw"; then
+        echo "   ✅ Capabilities verificadas correctamente"
+    fi
 else
-    echo "   Se necesitan permisos para multicast SADP"
-    echo ""
-    echo "   Ejecuta esto una sola vez:"
-    echo "   sudo setcap cap_net_raw,cap_net_admin=eip \"$INSTALL_DIR/sadp-linux-amd64\""
-    echo ""
+    echo "   ⚠️  setcap no encontrado, se intentará sin capabilities"
 fi
 
 echo ""
