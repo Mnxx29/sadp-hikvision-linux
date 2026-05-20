@@ -6,7 +6,7 @@ import webbrowser
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QTableWidget, 
                              QTableWidgetItem, QHeaderView, QMessageBox, QLabel, QProgressBar)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSettings
 from PyQt6.QtGui import QFont
 
 
@@ -138,6 +138,7 @@ class SADPGui(QMainWindow):
         self.setWindowTitle("SADP Tool para Linux")
         self.setGeometry(100, 100, 1000, 600)
         self.scan_thread = None
+        self.settings = QSettings("sadp", "sadp-gui")
         
         # Widget principal y Layout
         self.main_widget = QWidget()
@@ -190,10 +191,36 @@ class SADPGui(QMainWindow):
             "Número de Serie",
             "Versión"
         ])
-        self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        header = self.tabla.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        header.setSectionsClickable(True)
+        header.setSortIndicatorShown(True)
         self.tabla.setSelectionBehavior(self.tabla.SelectionBehavior.SelectRows)
         self.tabla.cellDoubleClicked.connect(self.celda_clickeada)
-        # Permitir ordenar por columnas haciendo click en el encabezado
+        # Restaurar estado del encabezado (orden/posición/tamaños) si existe
+        try:
+            state = self.settings.value("headerState")
+            if state is not None:
+                header.restoreState(state)
+        except Exception:
+            pass
+
+        # Restaurar columna/orden de ordenación
+        try:
+            sort_col = self.settings.value("sortColumn")
+            sort_order = self.settings.value("sortOrder")
+            if sort_col is not None:
+                sort_col = int(sort_col)
+                sort_order = int(sort_order) if sort_order is not None else int(Qt.SortOrder.AscendingOrder)
+                self.tabla.sortItems(sort_col, Qt.SortOrder(sort_order))
+        except Exception:
+            pass
+
+        # Conectar señales para persistir cambios del encabezado y orden
+        header.sectionMoved.connect(self.save_header_state)
+        header.sectionResized.connect(self.save_header_state)
+        header.sortIndicatorChanged.connect(self.save_sort_indicator)
+        # Habilitar ordenación; la deshabilitaremos temporalmente al rellenar
         self.tabla.setSortingEnabled(True)
         self.layout.addWidget(self.tabla)
         
@@ -227,6 +254,8 @@ class SADPGui(QMainWindow):
             self.status_label.setText("⚠️  No se encontraron dispositivos Hikvision en la red")
             return
         
+        # Desactivar ordenación mientras se insertan filas para evitar reordenados intermedios
+        self.tabla.setSortingEnabled(False)
         for idx, disp in enumerate(dispositivos):
             row_position = self.tabla.rowCount()
             self.tabla.insertRow(row_position)
@@ -265,7 +294,33 @@ class SADPGui(QMainWindow):
             version_text = disp.get('version', '')
             self.tabla.setItem(row_position, 6, SortableItem(version_text, sort_key=version_text))
         
+        # Volver a activar ordenación después de insertar todas las filas
+        self.tabla.setSortingEnabled(True)
         self.status_label.setText(f"✅ Se encontraron {len(dispositivos)} dispositivo(s)")
+
+    def save_header_state(self, *args):
+        try:
+            header = self.tabla.horizontalHeader()
+            state = header.saveState()
+            self.settings.setValue("headerState", state)
+        except Exception:
+            pass
+
+    def save_sort_indicator(self, index: int, order: Qt.SortOrder):
+        try:
+            self.settings.setValue("sortColumn", int(index))
+            # store as int
+            self.settings.setValue("sortOrder", int(order))
+        except Exception:
+            pass
+
+    def closeEvent(self, event):
+        # Guardar estado al cerrar
+        try:
+            self.save_header_state()
+        except Exception:
+            pass
+        super().closeEvent(event)
 
     def mostrar_error(self, mensaje):
         """Muestra un error"""
