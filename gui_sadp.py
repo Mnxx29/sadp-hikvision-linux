@@ -3,6 +3,8 @@ import subprocess
 import csv
 import io
 import webbrowser
+import os
+import shutil
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QTableWidget, 
                              QTableWidgetItem, QHeaderView, QMessageBox, QLabel, QProgressBar,
@@ -32,104 +34,108 @@ class ScanThread(QThread):
     
     def run(self):
         try:
-            import os
-            
             # Obtener la ruta del directorio donde está este script
             script_dir = os.path.dirname(os.path.abspath(__file__))
             
-            # Rutas posibles del binario (en orden de preferencia)
-            posibles_rutas = [
-                os.path.join(script_dir, "sadp-linux-amd64"),
-                os.path.join(script_dir, "sadp-linux-amd64-real"),
-                "./sadp-linux-amd64",
-                "./sadp-linux-amd64-real",
-            ]
-            
-            binario_path = None
-            for ruta in posibles_rutas:
-                if os.path.exists(ruta):
-                    binario_path = ruta
-                    break
+            # 1. Intentar buscar primero el binario directamente en el PATH del sistema
+            binario_path = shutil.which("sadp-linux-amd64")
             
             if not binario_path:
-                self.error.emit(f"No se encontró el binario SADP.\nBuscó en:\n- {script_dir}/sadp-linux-amd64\n- {script_dir}/sadp-linux-amd64-real\n\nAsegúrate de que el archivo esté en el mismo directorio que gui_sadp.py")
+                # Rutas posibles del binario (en orden de preferencia)
+                posibles_rutas = [
+                    os.path.join(script_dir, "sadp-linux-amd64"),
+                    os.path.join(script_dir, "sadp-linux-amd64-real"),
+                    os.path.expanduser("~/.local/bin/sadp/sadp-linux-amd64"),
+                    os.path.expanduser("~/.local/bin/sadp-linux-amd64"),
+                    "/usr/local/bin/sadp-linux-amd64",
+                    "./sadp-linux-amd64",
+                    "./sadp-linux-amd64-real",
+                ]
+                
+                for ruta in posibles_rutas:
+                    if os.path.exists(ruta):
+                        binario_path = ruta
+                        break
+            
+            if not binario_path:
+                self.error.emit(f"No se encontró el binario SADP.\n\nAsegúrate de que el archivo 'sadp-linux-amd64' esté en el mismo directorio que gui_sadp.py o instalado en ~/.local/bin/sadp/")
                 self.finished.emit()
                 return
             
-            # Intentar ejecutar el binario
+            # Ejecutar el binario Go directamente
             resultado = subprocess.run(
-                ["python3", binario_path, "discover:sadp"],
+                [binario_path, "discover:sadp"],
                 capture_output=True,
                 text=True,
                 timeout=30,
                 check=False
             )
             
-            # Si falla con python3, intentar ejecutarlo directamente
-            if resultado.returncode != 0 and not binario_path.endswith("-real"):
-                resultado = subprocess.run(
-                    [binario_path, "discover:sadp"],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                    check=False
-                )
-            
             if resultado.returncode != 0:
-                self.error.emit(f"Error al ejecutar sadp:\n{resultado.stderr}")
+                error_msg = resultado.stderr.strip() if resultado.stderr else "Código de salida no cero sin mensaje de error."
+                self.error.emit(f"Error al ejecutar sadp (Código {resultado.returncode}):\n{error_msg}")
                 self.finished.emit()
                 return
             
-            # Parsear la salida
+            # Parsear la salida de forma robusta y tolerante a fallos
             dispositivos = []
-            lineas = resultado.stdout.strip().split('\n')
+            lineas = resultado.stdout.splitlines()
             
-            # Buscar la línea donde comienzan los datos (después de los ===)
-            inicio_datos = False
             for linea in lineas:
-                if '-----' in linea or '=====' in linea:
-                    inicio_datos = True
+                linea_clean = linea.strip()
+                # Ignorar líneas vacías, comentarios o cabeceras obvias
+                if not linea_clean or linea_clean.startswith('#') or 'descubierto' in linea_clean.lower():
                     continue
                 
-                if inicio_datos and linea.strip() and not linea.startswith('#'):
-                    # Parsear cada línea de dispositivo
-                    # Formato: #   IP   MAC   Tipo   Estado   Puerto   Serial   Version
-                    partes = linea.split()
-                    
-                    if len(partes) >= 8:
-                        try:
-                            numero = partes[0]
-                            ip = partes[1]
-                            mac = partes[2]
-                            tipo = partes[3]
-                            estado = partes[4]
-                            puerto = partes[5]
-                            serial = partes[6]
-                            version = ' '.join(partes[7:])
-                            
-                            dispositivos.append({
-                                'ip': ip,
-                                'mac': mac,
-                                'tipo': tipo,
-                                'estado': estado,
-                                'puerto': puerto,
-                                'serial': serial,
-                                'version': version
-                            })
-                        except:
-                            pass
+                partes = linea_clean.split()
+                if len(partes) < 6:
+                    continue
+                
+                # Identificar dinámicamente cuál columna contiene la IP (por si hay o no una columna de índice al inicio)
+                idx_ip = -1
+                for i in range(min(3, len(partes))):
+                    subpartes = partes[i].split('.')
+                    if len(subpartes) == 4 and all(s.isdigit() for s in subpartes):
+                        idx_ip = i
+                        break
+                
+                if idx_ip == -1:
+                    continue  # No se localizó una estructura de IP en los primeros campos, saltar línea
+                
+                # Si encontramos la IP, extraemos los datos de manera relativa desde su posición
+                start_data = idx_ip
+                if len(partes) - start_data >= 6:
+                    try:
+                        ip      = partes[start_data]
+                        mac     = partes[start_data + 1]
+                        tipo    = partes[start_data + 2]
+                        estado  = partes[start_data + 3]
+                        puerto  = partes[start_data + 4]
+                        serial  = partes[start_data + 5]
+                        # La versión puede contener espacios, unimos el residuo del split
+                        version = " ".join(partes[start_data + 6:]) if len(partes) > start_data + 6 else 'N/A'
+                        
+                        dispositivos.append({
+                            'ip': ip,
+                            'mac': mac,
+                            'tipo': tipo,
+                            'estado': estado,
+                            'puerto': puerto,
+                            'serial': serial,
+                            'version': version
+                        })
+                    except Exception as parse_err:
+                        print(f"[DEBUG Parser] Error procesando línea: {linea_clean}. Detalle: {parse_err}")
+                        pass
             
             self.devices.emit(dispositivos)
             self.finished.emit()
             
         except subprocess.TimeoutExpired:
-            self.error.emit("Timeout: el escaneo tardó demasiado tiempo")
-            self.finished.emit()
-        except FileNotFoundError:
-            self.error.emit("No se encontró el binario 'sadp-linux-amd64' en el directorio actual")
+            self.error.emit("Timeout: el escaneo tardó demasiado tiempo (límite de 30 segundos)")
             self.finished.emit()
         except Exception as e:
-            self.error.emit(f"Error inesperado: {str(e)}")
+            self.error.emit(f"Error inesperado en el subproceso: {str(e)}")
             self.finished.emit()
 
 
@@ -548,7 +554,7 @@ class SADPGui(QMainWindow):
 
     def toggle_dhcp_fields(self, state):
         """Habilita o deshabilita los campos de IP si DHCP está activo"""
-        is_dhcp = (state == Qt.CheckState.Checked.value or state == True)
+        is_dhcp = (state == Qt.CheckState.Checked.value)
         # Si DHCP está activado, los campos de IP se autodefinen por la red, por ende se desactivan
         self.txt_ip.setDisabled(is_dhcp)
         self.txt_subnet.setDisabled(is_dhcp)
@@ -700,6 +706,7 @@ class SADPGui(QMainWindow):
         self.btn_scan.setEnabled(True)
         if self.dispositivos:
             self.btn_export.setEnabled(True)
+            self.btn_unbind.setEnabled(True)
         self.progress_bar.setVisible(False)
 
     def seleccionar_fila(self, row, column):

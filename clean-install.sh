@@ -62,7 +62,7 @@ remove_if_exists "$CACHE_DIR" "Caché de la aplicación (~/.cache/sadp)"
 # Limpiar comandos instalados
 if command -v sadp-gui &> /dev/null; then
     # Buscar y eliminar los symlinks o copias del comando
-    local cmd_path=$(command -v sadp-gui)
+    cmd_path=$(command -v sadp-gui)
     if [[ -L "$cmd_path" ]] || [[ "$cmd_path" == "$HOME/.local/bin/sadp-gui" ]]; then
         remove_if_exists "$cmd_path" "Comando sadp-gui"
     fi

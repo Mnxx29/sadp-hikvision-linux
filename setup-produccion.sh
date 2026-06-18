@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# SADP GUI para Linux - Script de Instalación de Producción
+# SADP GUI para Linux - Script de Instalación de Producción (Versión Definitiva)
 # Uso: bash setup-produccion.sh
 
 set -e
@@ -11,29 +11,12 @@ echo "║    Descubridor de Cámaras Hikvision                       ║"
 echo "╚════════════════════════════════════════════════════════════╝"
 echo ""
 
-# Validar que NO se ejecuta con sudo
 if [[ "$EUID" -eq 0 ]]; then
     echo "❌ ERROR: Este script NO debe ejecutarse con sudo"
-    echo ""
-    echo "   Ejecuta:"
-    echo "   bash setup-produccion.sh"
-    echo ""
-    echo "   NO ejecutes:"
-    echo "   sudo bash setup-produccion.sh"
-    echo ""
-    echo "   El script pedirá sudo automáticamente cuando sea necesario"
     exit 1
 fi
 
-# Guardar el directorio donde se ejecutó el script (donde están los archivos)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Verificar que es Ubuntu
-if ! grep -q "Ubuntu" /etc/os-release 2>/dev/null; then
-    echo "❌ Este script está diseñado para Ubuntu"
-    exit 1
-fi
-
 INSTALL_DIR="$HOME/.local/bin/sadp"
 mkdir -p "$INSTALL_DIR"
 
@@ -41,176 +24,113 @@ echo "📋 Sistema: $(grep PRETTY_NAME /etc/os-release | cut -d'"' -f2)"
 echo "📁 Instalación en: $INSTALL_DIR"
 echo ""
 
-# FUNCIÓN: Configurar firewall para SADP multicast
+# FUNCIÓN: Configurar firewall base
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 configure_ufw() {
-    echo "🔐 Configurando firewall para SADP multicast..."
-    
-    # Verificar si UFW está instalado
-    if ! command -v ufw &> /dev/null; then
-        echo "   ⚠️  UFW no instalado, usando iptables directamente"
-        configure_iptables
-        return 0
-    fi
-    
-    # Intentar configurar con UFW (método moderno)
-    local ufw_ok=true
-    
-    # Permitir puerto SADP específico (UDP 37810)
-    sudo ufw allow 37810/udp 2>/dev/null && \
-        echo "   ✓ Puerto SADP UDP 37810 permitido" || {
-        echo "   ⚠️  No se pudo permitir puerto 37810 en UFW"
-        ufw_ok=false
-    }
-    
-    # Permitir multicast en entrada
-    sudo ufw allow in proto udp to 224.0.0.0/4 2>/dev/null && \
-        echo "   ✓ Multicast entrada permitido" || echo "   ⚠️  Multicast entrada (intento fallido)"
-    
-    # Permitir multicast en salida
-    sudo ufw allow out proto udp to 224.0.0.0/4 2>/dev/null && \
-        echo "   ✓ Multicast salida permitido" || echo "   ⚠️  Multicast salida (intento fallido)"
-    
-    # Habilitar UFW si no está habilitado
-    if ! sudo ufw status | grep -q "Status: active"; then
-        sudo ufw --force enable 2>/dev/null && echo "   ✓ Firewall habilitado" || echo "   ⚠️  Error habilitando firewall"
-    else
-        echo "   ✓ Firewall ya está activo"
-    fi
-    
-    # Si UFW falla, usar iptables como fallback
-    if [[ "$ufw_ok" == false ]]; then
-        echo ""
-        echo "   📋 Configurando reglas iptables adicionales..."
-        configure_iptables
-    fi
-    
-    echo ""
-}
-
-configure_iptables() {
-    echo "   🔧 Configurando iptables para SADP..."
-    
-    # Permitir todo el tráfico multicast
-    sudo iptables -A INPUT -d 224.0.0.0/4 -j ACCEPT 2>/dev/null && echo "   ✓ Entrada multicast aceptada" || true
-    sudo iptables -A OUTPUT -d 224.0.0.0/4 -j ACCEPT 2>/dev/null && echo "   ✓ Salida multicast aceptada" || true
-    
-    # Permitir específicamente puerto SADP
-    sudo iptables -A INPUT -p udp --dport 37810 -j ACCEPT 2>/dev/null && echo "   ✓ Puerto entrada 37810 aceptado" || true
-    sudo iptables -A OUTPUT -p udp --dport 37810 -j ACCEPT 2>/dev/null && echo "   ✓ Puerto salida 37810 aceptado" || true
-    
-    # Persistir las reglas (ip6tables también)
-    if command -v iptables-save &> /dev/null; then
-        sudo iptables-save | sudo tee /etc/iptables/rules.v4 >/dev/null 2>&1 || true
-    fi
-    
-    if command -v ip6tables-save &> /dev/null; then
-        sudo ip6tables-save | sudo tee /etc/iptables/rules.v6 >/dev/null 2>&1 || true
+    echo "🔐 Configurando firewall base..."
+    if command -v ufw &> /dev/null; then
+        sudo ufw allow 37020/udp 2>/dev/null
+        sudo ufw allow out proto udp to 224.0.0.0/4 2>/dev/null
+        if ! sudo ufw status | grep -q "Status: active"; then
+            sudo ufw --force enable 2>/dev/null
+        fi
     fi
 }
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Paso 1: Instalación de dependencias
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "Paso 1: Instalando dependencias..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-
 sudo apt update >/dev/null 2>&1 || true
-echo "📦 Instalando: python3, python3-pyqt6, golang-go, git, ufw..."
-
-sudo apt install -y python3 python3-pyqt6 golang-go git ufw >/dev/null 2>&1
-
-echo "✅ Dependencias instaladas"
+sudo apt install -y python3 python3-pyqt6 golang-go git ufw libcap2-bin >/dev/null 2>&1
+GO_VERSION=$(go version 2>/dev/null | grep -oP 'go\K[0-9]+\.[0-9]+' | head -1)
+echo "✅ Dependencias instaladas (Go $GO_VERSION)"
 echo ""
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Paso 2: Verificando configuración de red
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "Paso 2: Verificando configuración de red..."
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-echo "🔎 No es necesaria una interfaz específica: SADP busca sobre la red local activa."
-echo ""
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Paso 3: Compilar binario SADP
+# Paso 2: Compilar binario SADP
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "Paso 3: Compilando binario SADP..."
+echo "Paso 2: Compilando binario SADP..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-
 TEMP_BUILD="/tmp/sadp-build-$$"
 mkdir -p "$TEMP_BUILD"
-
-echo "📥 Clonando repositorio hikvision-tooling..."
 cd "$TEMP_BUILD"
 git clone --depth 1 https://github.com/cameronnewman/hikvision-tooling.git >/dev/null 2>&1
-
 cd hikvision-tooling
-echo "🔨 Compilando con Go (esto puede tardar 30-60 segundos)..."
 
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o sadp-linux-amd64 ./cmd/sadp 2>&1 | grep -v "^$" || true
+BUILD_OUTPUT=$(CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o sadp-linux-amd64 ./cmd/sadp 2>&1) || true
 
 if [[ -f "sadp-linux-amd64" ]]; then
-    echo "✅ Binario compilado exitosamente"
     cp sadp-linux-amd64 "$INSTALL_DIR/"
     chmod +x "$INSTALL_DIR/sadp-linux-amd64"
+    echo "✅ Binario compilado exitosamente"
 else
     echo "❌ Error compilando el binario"
+    rm -rf "$TEMP_BUILD"
     exit 1
 fi
-
 echo ""
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Paso 4: Copiar GUI
+# Paso 3: Copiar GUI
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "Paso 4: Instalando interfaz gráfica..."
+echo "Paso 3: Instalando interfaz gráfica..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-
-# Buscar gui_sadp.py en el directorio original del script
 if [[ -f "$SCRIPT_DIR/gui_sadp.py" ]]; then
     cp "$SCRIPT_DIR/gui_sadp.py" "$INSTALL_DIR/"
     chmod +x "$INSTALL_DIR/gui_sadp.py"
     echo "✅ GUI instalada"
 else
-    echo "❌ No se pudo encontrar gui_sadp.py en $SCRIPT_DIR"
-    echo "   Asegúrate de que el archivo gui_sadp.py está en el mismo directorio que el script de instalación"
+    echo "❌ No se pudo encontrar gui_sadp.py"
     exit 1
 fi
-
 echo ""
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Paso 5: Crear lanzador
+# Paso 4: Configurar permisos silenciosos
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "Paso 5: Creando lanzador..."
+echo "Paso 4: Configurando permisos de red automatizados..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+SUDOERS_FILE="/etc/sudoers.d/sadp-gui-routing"
+echo "ALL ALL=(root) NOPASSWD: /usr/sbin/ip route add 239.255.255.250/32 *, /usr/sbin/ip route change 239.255.255.250/32 *, /bin/ip route add 239.255.255.250/32 *, /bin/ip route change 239.255.255.250/32 *, /usr/sbin/ufw allow in on *" | sudo tee "$SUDOERS_FILE" >/dev/null
+sudo chmod 0440 "$SUDOERS_FILE"
+echo "✅ Permisos silenciosos configurados"
 echo ""
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Paso 5: Crear Lanzador Inteligente
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "Paso 5: Creando lanzador inteligente..."
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 LAUNCHER="$HOME/.local/bin/sadp-gui"
+
 cat > "$LAUNCHER" << 'LAUNCHER_EOF'
 #!/bin/bash
+# 1. Detectar cable de red activo
+ETH_IFACE=$(ip link show | grep -E "^[0-9]+: (en|eth)" | grep "state UP" | awk -F': ' '{print $2}' | head -n 1)
+
+if [ ! -z "$ETH_IFACE" ]; then
+    # 2. Forzar ruta multicast por el cable
+    sudo ip route add 239.255.255.250/32 dev $ETH_IFACE 2>/dev/null || \
+    sudo ip route change 239.255.255.250/32 dev $ETH_IFACE 2>/dev/null
+    
+    # 3. Decirle al firewall que confíe en todas las respuestas que vengan por ese cable
+    sudo ufw allow in on $ETH_IFACE 2>/dev/null
+fi
+
+# 4. Iniciar GUI
 cd "$HOME/.local/bin/sadp"
 python3 gui_sadp.py
 LAUNCHER_EOF
 
 chmod +x "$LAUNCHER"
-echo "✅ Lanzador creado: sadp-gui"
-echo ""
+echo "✅ Lanzador inteligente creado"
 
 APPLICATIONS_DIR="$HOME/.local/share/applications"
 mkdir -p "$APPLICATIONS_DIR"
@@ -228,71 +148,20 @@ Categories=Network;Utility;
 StartupNotify=true
 DESKTOP_EOF
 chmod +x "$DESKTOP_FILE"
-echo "✅ Lanzador de escritorio creado: $DESKTOP_FILE"
 echo ""
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Paso 6: Configurar permisos de red
+# Paso 6: Configurar firewall inicial y setcap
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "Paso 6: Configurando firewall para multicast..."
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-
 configure_ufw
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Paso 7: Configurar permisos de red para el binario
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "Paso 7: Configurando permisos de red para el binario..."
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-
-echo "   Configurando capabilities del binario para multicast..."
 if command -v setcap &> /dev/null; then
-    # Dar capacidades necesarias para raw sockets y multicast
-    sudo setcap cap_net_raw=ep "$INSTALL_DIR/sadp-linux-amd64" 2>/dev/null && \
-        echo "   ✅ Permisos cap_net_raw configurados" || \
-        echo "   ⚠️  Error configurando cap_net_raw"
-    
-    # Verificar que se asignaron correctamente
-    if sudo getcap "$INSTALL_DIR/sadp-linux-amd64" 2>/dev/null | grep -q "cap_net_raw"; then
-        echo "   ✅ Capabilities verificadas correctamente"
-    fi
-else
-    echo "   ⚠️  setcap no encontrado, se intentará sin capabilities"
+    sudo setcap cap_net_raw=ep "$INSTALL_DIR/sadp-linux-amd64" 2>/dev/null
 fi
 
-echo ""
-
-# Limpiar archivos temporales
 rm -rf "$TEMP_BUILD"
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# RESUMEN FINAL
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 echo "╔════════════════════════════════════════════════════════════╗"
 echo "║            ✅ INSTALACIÓN COMPLETADA                       ║"
 echo "╚════════════════════════════════════════════════════════════╝"
-echo ""
-echo "🚀 Para abrir la aplicación, ejecuta:"
-echo ""
-echo "   sadp-gui"
-echo ""
-echo "   O:"
-echo ""
-echo "   python3 ~/.local/bin/sadp/gui_sadp.py"
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-echo "📋 Configuración aplicada:"
-echo "   • Firewall: Configurado para multicast"
-echo "   • Directorio instalación: $INSTALL_DIR"
-echo "   • Lanzador de escritorio: $DESKTOP_FILE"
-echo ""
-echo "✨ ¡Listo para usar en cualquier PC!"
-echo ""
+echo "   El sistema está listo para producción. El firewall gestionará"
+echo "   las interfaces automáticamente de forma silenciosa."
